@@ -1,0 +1,37 @@
+name: ORAX Web2APK
+on:
+  workflow_dispatch:
+    inputs:
+      web_url: {required: true, type: string}
+      app_name: {required: true, type: string}
+      package_name: {required: true, type: string}
+      tag: {required: true, type: string}
+permissions: {contents: read}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: subosito/flutter-action@v2
+        with: {channel: stable, cache: true}
+      - run: flutter create --project-name orax_web2apk --org "${{ inputs.package_name }}" webapp
+      - name: Configure WebView
+        working-directory: webapp
+        env: {WEB_URL: ${{ inputs.web_url }}, APP_NAME: ${{ inputs.app_name }}}
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          p=Path('pubspec.yaml');s=p.read_text();s=s.replace('cupertino_icons: ^1.0.8','cupertino_icons: ^1.0.8
+  webview_flutter: ^4.10.0');p.write_text(s)
+          u=__import__('os').environ['WEB_URL'];n=__import__('os').environ['APP_NAME']
+          Path('lib/main.dart').write_text("import 'package:flutter/material.dart';
+import 'package:webview_flutter/webview_flutter.dart';
+void main()=>runApp(const App());
+class App extends StatelessWidget{const App({super.key});Widget build(BuildContext c)=>MaterialApp(debugShowCheckedModeBanner:false,title:"+repr(n)+",home:const Home());}
+class Home extends StatefulWidget{const Home({super.key});State<Home> createState()=>_Home();}
+class _Home extends State<Home>{late final WebViewController c;void initState(){super.initState();c=WebViewController()..setJavaScriptMode(JavaScriptMode.unrestricted)..loadRequest(Uri.parse("+repr(u)+"));}Widget build(BuildContext x)=>Scaffold(body:SafeArea(child:WebViewWidget(controller:c)));}
+")
+          flutter pub get
+          flutter build apk --release
+      - uses: actions/upload-artifact@v4
+        with: {name: orax-web2apk-${{ inputs.tag }}, path: webapp/build/app/outputs/flutter-apk/app-release.apk}
