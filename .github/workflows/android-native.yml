@@ -1,0 +1,39 @@
+name: ORAX Android Native Build
+on:
+  workflow_dispatch:
+    inputs:
+      asset_id: {required: true, type: string}
+      build_type: {required: true, default: release, type: string}
+      repair: {required: false, default: 'false', type: string}
+      tag: {required: true, type: string}
+permissions: {contents: read}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - name: Download ZIP
+        env: {GH_TOKEN: ${{ github.token }}}
+        run: |
+          curl -fL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${{ inputs.asset_id }}" -o project.zip
+          mkdir src && unzip -q project.zip -d src
+          ROOT=$(find src -name gradlew -print -quit | xargs -r dirname); test -n "$ROOT"; echo "ROOT=$ROOT" >> $GITHUB_ENV
+      - name: Repair / dependency refresh
+        working-directory: ${{ env.ROOT }}
+        run: |
+          chmod +x gradlew
+          ./gradlew clean --no-daemon
+          ./gradlew --refresh-dependencies --no-daemon
+          if [ "${{ inputs.repair }}" = "true" ]; then
+            ./gradlew assembleDebug --no-daemon || true
+            ./gradlew assembleRelease --no-daemon || true
+          fi
+      - name: Build
+        working-directory: ${{ env.ROOT }}
+        run: |
+          if [ "${{ inputs.build_type }}" = "debug" ]; then ./gradlew assembleDebug --no-daemon; else ./gradlew assembleRelease --no-daemon; fi
+      - uses: actions/upload-artifact@v4
+        with: {name: orax-native-${{ inputs.tag }}, path: ${{ env.ROOT }}/**/build/outputs/apk/**/*.apk}
