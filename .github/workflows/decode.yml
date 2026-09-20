@@ -1,0 +1,21 @@
+name: ORAX APK Decode
+on:
+  workflow_dispatch:
+    inputs: {asset_id: {required: true, type: string}, tag: {required: true, type: string}}
+permissions: {contents: read}
+jobs:
+  decode:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/setup-java@v4
+        with: {distribution: temurin, java-version: '17'}
+      - name: Download APK
+        env: {GH_TOKEN: ${{ github.token }}}
+        run: curl -fL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${{ inputs.asset_id }}" -o app.apk
+      - name: Decode resources
+        run: |
+          curl -fsSL https://github.com/iBotPeaches/Apktool/releases/latest/download/apktool.jar -o apktool.jar
+          java -jar apktool.jar d app.apk -o decoded --force
+          unzip -l app.apk > apk-contents.txt
+      - uses: actions/upload-artifact@v4
+        with: {name: orax-decode-${{ inputs.tag }}, path: "decoded/**"}
