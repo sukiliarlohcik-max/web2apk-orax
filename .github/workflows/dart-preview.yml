@@ -1,0 +1,49 @@
+name: ORAX Dart Preview
+on:
+  workflow_dispatch:
+    inputs:
+      asset_id: {required: true, type: string}
+      file_name: {required: true, type: string}
+      tag: {required: true, type: string}
+permissions: {contents: read}
+jobs:
+  preview:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: subosito/flutter-action@v2
+        with: {channel: stable, cache: true}
+      - uses: actions/checkout@v4
+      - name: Download Dart source
+        env: {GH_TOKEN: ${{ github.token }}}
+        run: |
+          curl -fL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${{ inputs.asset_id }}" -o main.dart
+      - name: Create Flutter Web project
+        run: |
+          flutter create --platforms=web --project-name orax_dart_preview preview_app
+          cp main.dart preview_app/lib/main.dart
+          cd preview_app
+          flutter pub get
+          flutter build web --release
+      - name: Install Chromium + Playwright
+        run: |
+          npx --yes playwright@1.55.0 install --with-deps chromium
+      - name: Serve and screenshot
+        working-directory: preview_app
+        run: |
+          python3 -m http.server 4173 --directory build/web >/tmp/orax-preview-server.log 2>&1 &
+          SERVER_PID=$!
+          trap 'kill $SERVER_PID || true' EXIT
+          for i in $(seq 1 30); do curl -fsS http://127.0.0.1:4173/ >/dev/null && break; sleep 1; done
+          node - <<'JS'
+          const { chromium } = require('playwright');
+          (async()=>{
+            const browser=await chromium.launch({headless:true,args:['--no-sandbox','--disable-dev-shm-usage']});
+            const page=await browser.newPage({viewport:{width:1080,height:1920},deviceScaleFactor:1});
+            await page.goto('http://127.0.0.1:4173/',{waitUntil:'networkidle',timeout:60000});
+            await page.screenshot({path:'preview.png',fullPage:true});
+            await browser.close();
+          })().catch(e=>{console.error(e);process.exit(1)});
+          JS
+      - uses: actions/upload-artifact@v4
+        with: {name: orax-dart-preview-${{ inputs.tag }}, path: preview_app/preview.png}
