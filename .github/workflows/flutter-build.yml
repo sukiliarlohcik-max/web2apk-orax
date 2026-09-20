@@ -1,0 +1,43 @@
+name: ORAX Flutter Build
+on:
+  workflow_dispatch:
+    inputs:
+      asset_id: {required: true, type: string}
+      build_type: {required: true, default: release, type: string}
+      repair: {required: false, default: 'false', type: string}
+      tag: {required: true, type: string}
+permissions: {contents: read}
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download ZIP
+        env: {GH_TOKEN: ${{ github.token }}}
+        run: |
+          curl -fL -H "Authorization: Bearer $GH_TOKEN" -H "Accept: application/octet-stream" "https://api.github.com/repos/${{ github.repository }}/releases/assets/${{ inputs.asset_id }}" -o project.zip
+          mkdir src && unzip -q project.zip -d src
+          ROOT=$(find src -name pubspec.yaml -print -quit | xargs -r dirname); test -n "$ROOT"; echo "ROOT=$ROOT" >> $GITHUB_ENV
+      - uses: subosito/flutter-action@v2
+        with: {channel: stable, cache: true}
+      - name: Analyze and auto-fix
+        working-directory: ${{ env.ROOT }}
+        run: |
+          flutter pub get
+          flutter analyze --no-fatal-infos > ../analyze.log 2>&1 || true
+          if [ "${{ inputs.repair }}" = "true" ]; then
+            dart format . || true
+            dart fix --apply || true
+            flutter fix --apply || true
+            flutter pub get
+            flutter analyze --no-fatal-infos > ../analyze-after-fix.log 2>&1 || true
+          fi
+      - name: Build
+        working-directory: ${{ env.ROOT }}
+        run: if [ "${{ inputs.build_type }}" = "debug" ]; then flutter build apk --debug; else flutter build apk --release; fi
+      - uses: actions/upload-artifact@v4
+        with: {name: orax-apk-${{ inputs.tag }}, path: ${{ env.ROOT }}/build/app/outputs/flutter-apk/*.apk}
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with: {name: orax-analysis-${{ inputs.tag }}, path: src/analyze.log, if-no-files-found: ignore}
